@@ -102,10 +102,11 @@ address, cite { font-style: normal; }
 .pick-btn[aria-pressed="true"] { background: var(--team); color: var(--paper); }
 .pick-btn[aria-pressed="true"]::before { width: 13px; margin-right: 0; }
 
-.status { display: inline-flex; align-items: center; gap: 9px; }
+.status { display: inline-flex; align-items: center; gap: 9px; position: relative; }
 .status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--dot, var(--shut)); flex: none; }
-.status.is-open::before { animation: pulse 2.4s var(--ease) infinite; }
-@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(59, 165, 92, .55); } 70%, 100% { box-shadow: 0 0 0 9px rgba(59, 165, 92, 0); } }
+/* the open-now ring grows and fades with transform and opacity only, so it never repaints the page */
+.status.is-open::after { content: ''; position: absolute; left: 0; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: rgba(59, 165, 92, .55); pointer-events: none; animation: pulse 2.4s var(--ease) infinite; }
+@keyframes pulse { 0% { transform: scale(1); opacity: 1; } 70%, 100% { transform: scale(3.25); opacity: 0; } }
 
 /* ---------- nav: a solid strip, mirrored around the mark ---------- */
 
@@ -153,7 +154,6 @@ address, cite { font-style: normal; }
   --name: min(9vw, 15vh);     /* the two names */
   --the: .36;                 /* the small "The" and "and" above the names, in ems of the name */
   --top: calc(var(--nav-h) + 3.4vh);
-  --under: calc(var(--top) + var(--name) * (var(--the) + .8) + 16px); /* just below the names */
   --jp: clamp(18px, 1.6vw, 25px);
   position: relative; height: 100vh; height: 100svh; min-height: 660px; max-height: 1200px; overflow: hidden;
   color: var(--paper); background: var(--blue); isolation: isolate;
@@ -169,27 +169,31 @@ address, cite { font-style: normal; }
 .side--cowboy .side-lines { color: rgba(255, 214, 196, .07); }
 .side--samurai .side-lines { color: rgba(186, 210, 255, .07); }
 
+/* The words on each side flow as one block: the name, then the katakana and the description under it.
+   (They used to be placed one by one from the name's expected size; Safari zoomed in grows text sized in vw
+   but not positions, so the name landed on the words below it.) main.js sets --fit so each name clears the blade. */
+.side-copy { position: absolute; top: var(--top); display: grid; column-gap: 18px; align-items: start; }
+.side--cowboy .side-copy { left: var(--gut); grid-template-columns: min-content 1fr; justify-items: start; } /* the katakana hugs its column, the description sits right beside it */
+.side--samurai .side-copy { right: var(--gut); grid-template-columns: 1fr min-content; justify-items: end; text-align: right; }
 .side-name {
-  position: absolute; top: var(--top); z-index: 2;
+  position: relative; z-index: 2; grid-column: 1 / -1; margin-bottom: 14px;
   font-weight: 900; font-stretch: 86%; text-transform: uppercase; letter-spacing: -.04em; line-height: .8;
-  font-size: var(--name); color: var(--paper);
+  font-size: calc(var(--name) * var(--fit, 1)); color: var(--paper); white-space: nowrap;
 }
-.side--cowboy .side-name { left: var(--gut); }
-.side--samurai .side-name { right: var(--gut); text-align: right; }
 .side-the { display: block; font-size: .3em; letter-spacing: -.01em; line-height: 1; height: calc(var(--the) / .3 * 1em); margin: 0 .06em; }
 .side-jp {
-  position: absolute; z-index: 2; top: var(--under); writing-mode: vertical-rl; text-orientation: upright;
+  position: relative; z-index: 2; grid-row: 2; writing-mode: vertical-rl; text-orientation: upright;
   font-size: var(--jp); letter-spacing: .12em; line-height: 1; color: rgba(243, 236, 223, .82);
 }
-.side--cowboy .side-jp { left: var(--gut); }
-.side--samurai .side-jp { right: var(--gut); }
+.side--cowboy .side-jp { grid-column: 1; }
+.side--samurai .side-jp { grid-column: 2; }
 .side-desc {
-  position: absolute; z-index: 4; top: calc(var(--under) + 2px); max-width: 17ch;
+  position: relative; z-index: 4; grid-row: 2; margin-top: 2px; max-width: 17ch;
   font-size: clamp(15px, 1.12vw, 18px); line-height: 1.3; font-weight: 500; color: rgba(243, 236, 223, .9);
 }
 .side-desc strong { display: block; font-weight: 750; color: var(--paper); margin-bottom: 4px; }
-.side--cowboy .side-desc { left: calc(var(--gut) + var(--jp) + 18px); }
-.side--samurai .side-desc { right: calc(var(--gut) + var(--jp) + 18px); text-align: right; }
+.side--cowboy .side-desc { grid-column: 2; }
+.side--samurai .side-desc { grid-column: 1; }
 
 .side-hand { position: absolute; z-index: 3; width: auto; max-width: none; transform-origin: 50% 100%; will-change: transform; user-select: none; -webkit-user-drag: none; }
 .side--cowboy .side-hand {
@@ -210,6 +214,7 @@ address, cite { font-style: normal; }
 .seam-glint { stroke: #fff; stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-dasharray: 90 4000; stroke-linecap: round; animation: glint 5.5s var(--ease) infinite 2.6s; filter: drop-shadow(0 0 6px rgba(255, 255, 255, .9)); }
 @keyframes glint { 0% { stroke-dashoffset: 120; opacity: 0; } 8% { opacity: 1; } 34% { stroke-dashoffset: -2200; opacity: 1; } 40%, 100% { stroke-dashoffset: -2200; opacity: 0; } }
 .hero.is-picked .seam-glint { animation: glint 1.1s var(--ease) 1; }
+.hero.is-off .seam-glint, .hero.is-off .status::after { animation-play-state: paused; }
 
 /* the billing block */
 .bill {
@@ -393,7 +398,8 @@ html:not(.js) .intro, html.seen .intro, html.reduced .intro { display: none; }
 .events-text p { font-size: clamp(17px, 1.2vw, 19px); color: rgba(243, 236, 223, .86); }
 .events-links { display: flex; flex-wrap: wrap; gap: 10px; }
 .reel-wrap { margin-top: clamp(60px, 7vw, 110px); }
-.reel { --g: 10px; --h: clamp(300px, 30vw, 480px); --s: calc(var(--h) * var(--tilt)); display: flex; width: max-content; padding: 0 var(--gut); will-change: transform; }
+.reel { --g: 10px; --h: clamp(300px, 30vw, 480px); --s: calc(var(--h) * var(--tilt)); display: flex; width: max-content; padding: 0 var(--gut); }
+@media (min-width: 761px) { .reel { will-change: transform; } } /* it only moves with the scroll on wider screens */
 .reel li { width: calc(var(--h) * var(--r)); flex: none; }
 .reel li + li { margin-left: calc(var(--s) * -2); }
 .reel .cut { background: #000; clip-path: polygon(calc(var(--s) * 2 + var(--g) / 2) 0, calc(100% - var(--g) / 2) 0, calc(100% - var(--s) * 2 - var(--g) / 2) 100%, calc(var(--g) / 2) 100%); }
@@ -505,13 +511,14 @@ html:not(.js) .intro, html.seen .intro, html.reduced .intro { display: none; }
 /* phones and tall tablets: the hero becomes a versus card */
 @media (max-width: 760px), (max-aspect-ratio: 4/5) {
   /* Each side fills the card and the blade sweeps between them (main.js). */
-  .hero { --strip: calc(124px + env(safe-area-inset-bottom)); --name: 17vw; --the: .4; --top: calc(var(--nav-h) + 2.4vh); --under: calc(var(--top) + var(--name) * (var(--the) + .8) + 12px); --jp: 17px; min-height: 620px; max-height: none; touch-action: pan-y; }
-  .side--cowboy .side-desc, .side--samurai .side-desc { max-width: 22ch; font-size: 15px; }
-  .side--cowboy .side-desc { left: var(--gut); }
-  .side--samurai .side-desc { right: var(--gut); }
-  .side-jp { top: calc(var(--top) + 4px); }
-  .side--cowboy .side-jp { left: auto; right: var(--gut); }
-  .side--samurai .side-jp { right: auto; left: var(--gut); }
+  .hero { --strip: calc(124px + env(safe-area-inset-bottom)); --name: 17vw; --the: .4; --top: calc(var(--nav-h) + 2.4vh); --jp: 17px; min-height: 620px; max-height: none; touch-action: pan-y; }
+  /* one column: the name, the description under it; the katakana stands at the far edge, across from the name */
+  .side--cowboy .side-copy, .side--samurai .side-copy { left: var(--gut); right: var(--gut); grid-template-columns: minmax(0, 1fr); }
+  .side-name { margin-bottom: 12px; }
+  .side--cowboy .side-desc, .side--samurai .side-desc { grid-column: 1; max-width: 22ch; font-size: 15px; }
+  .side-jp { position: absolute; top: 4px; grid-area: auto; } /* placed in a grid row, top would count from that row */
+  .side--cowboy .side-jp { right: 0; }
+  .side--samurai .side-jp { left: 0; }
   .side--cowboy .side-hand { --h: min(60svh, 140vw); bottom: calc(var(--strip) - 7svh); left: calc(52vw - var(--h) * .325); }
   .side--samurai .side-hand { --h: min(66svh, 155vw); bottom: calc(var(--strip) - 13svh); right: calc(54vw - var(--h) * .43); }
   .bill { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-content: center; gap: 12px 16px; padding: 0 var(--gut) env(safe-area-inset-bottom); font-size: 13px; }
@@ -572,7 +579,7 @@ html:not(.js) .intro, html.seen .intro, html.reduced .intro { display: none; }
   .spec { padding: 0; margin-left: calc(var(--gut) * -1); margin-right: calc(var(--gut) * -1); overflow: hidden; }
   .spec img { width: 100%; }
   .spec-lines { display: none; }
-  .spec-labels li, .spec-labels li[data-side="l"] { left: var(--lx); right: auto; margin: 0; transform: translate(-50%, -50%); font-size: 12px; padding: 5px 9px 6px; border-radius: 999px; background: rgba(21, 19, 19, .72); text-shadow: none; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+  .spec-labels li, .spec-labels li[data-side="l"] { left: var(--lx); right: auto; margin: 0; transform: translate(-50%, -50%); font-size: 12px; padding: 5px 9px 6px; border-radius: 999px; background: rgba(21, 19, 19, .84); text-shadow: none; }
 
   .menu-head p { margin-top: 18px; }
   .sides { grid-template-columns: minmax(0, 1fr); row-gap: 52px; }

@@ -12,6 +12,20 @@
   const phone = matchMedia('(max-width: 760px), (max-aspect-ratio: 4/5)') // the hero's versus-card layout
   if (reduced) document.documentElement.classList.add('reduced')
 
+  // Resizes, settled. On touch screens a change in height alone is the browser's toolbar sliding in or out
+  // as you scroll: nothing here depends on it, and redrawing then made scrolling stutter on phones.
+  const resizers = []
+  let rw = innerWidth, rh = innerHeight, rzt
+  addEventListener('resize', () => {
+    clearTimeout(rzt)
+    rzt = setTimeout(() => {
+      if (innerWidth === rw && (!fine || innerHeight === rh)) return
+      rw = innerWidth; rh = innerHeight
+      resizers.forEach((f) => f())
+    }, 150)
+  })
+  const onResize = (f) => resizers.push(f)
+
   gsap.registerPlugin(ScrollTrigger, SplitText)
   gsap.defaults({ ease: 'expo.out', duration: 1.2 })
 
@@ -53,11 +67,16 @@
     gsap.ticker.lagSmoothing(0)
   }
   const navH = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--nav-h')) || 76
+  // A jump from a link keeps the nav in place, so the section lands just under it instead of under a gap.
+  let jumping = false
   function scrollToEl(el) {
     if (!el) return
     const offset = el.id === 'top' ? 0 : navH() - 1
-    if (lenis) lenis.scrollTo(el, { offset: -offset, duration: 1.6, force: true, easing: (t) => 1 - Math.pow(1 - t, 4), onComplete: () => { if (Math.abs(el.getBoundingClientRect().top - offset) > 4) lenis.scrollTo(el, { offset: -offset, duration: 0.6 }) } })
-    else window.scrollTo({ top: el.getBoundingClientRect().top + scrollY - offset, behavior: reduced ? 'auto' : 'smooth' })
+    jumping = true
+    nav.classList.remove('is-hidden')
+    const landed = () => { jumping = false; lastY = scrollY }
+    if (lenis) lenis.scrollTo(el, { offset: -offset, duration: 1.6, force: true, easing: (t) => 1 - Math.pow(1 - t, 4), onComplete: () => { if (Math.abs(el.getBoundingClientRect().top - offset) > 4) lenis.scrollTo(el, { offset: -offset, duration: 0.6, onComplete: landed }); else landed() } })
+    else { window.scrollTo({ top: el.getBoundingClientRect().top + scrollY - offset, behavior: reduced ? 'auto' : 'smooth' }); setTimeout(landed, reduced ? 0 : 1200) }
   }
   document.addEventListener('click', (e) => {
     const a = e.target.closest('a[href^="#"]')
@@ -75,9 +94,11 @@
   const nav = $('[data-nav]')
   const hero = $('[data-hero]')
   let lastY = 0
+  let heroH = hero.offsetHeight // measured on resize, not on every scroll (reading it here forced a layout per frame)
   function onScroll() {
     const y = scrollY
-    const past = y > hero.offsetHeight * 0.9
+    if (jumping) { lastY = y; return }
+    const past = y > heroH * 0.9
     if (past && y > lastY + 2 && !sheetOpen) nav.classList.add('is-hidden')
     if (y < lastY - 2 || !past) nav.classList.remove('is-hidden')
     lastY = y
@@ -141,6 +162,9 @@
   // Desktop keeps c near the middle. Phones show one side at a time: c = 1.25 is all Cowboy, -0.25 all Samurai.
   const SLANT = () => (phone.matches ? 0.12 : 0.04)
   const FULL = { cowboy: 1.25, samurai: -0.25 }
+  // How far the cut may lean from the middle on desktop (pointer, a pick). Kept small enough that, with the names
+  // fitted to it (fitNames), the cut never slices into the other side's name.
+  const LEAN = 0.07, REST = 0.06
   function seamAt(c) { const s = SLANT(); return { a: c + s, b: c - s } }
   function sideAt(x, y) {
     const r = hero.getBoundingClientRect()
@@ -149,25 +173,28 @@
     return (x - r.left) / r.width < lerp(a, b, fy) ? 'cowboy' : 'samurai'
   }
 
-  function paintSeam() {
+  // Writes go straight to the cut side, the two hands and the blade, and only when the cut has moved:
+  // custom properties set on the hero made every element inside it restyle on every frame.
+  let painted = NaN
+  function paintSeam(force) {
+    if (!force && Math.abs(st.c - painted) < 0.0002) return
+    painted = st.c
     const { a, b } = seamAt(st.c)
-    hero.style.setProperty('--a', (a * 100).toFixed(3) + '%')
-    hero.style.setProperty('--b', (b * 100).toFixed(3) + '%')
-    const lc = phone.matches ? 0 : clamp((st.c - 0.5) / 0.12, 0, 1), ls = phone.matches ? 0 : clamp((0.5 - st.c) / 0.12, 0, 1)
-    hero.style.setProperty('--lift-c', lc.toFixed(4))
-    hero.style.setProperty('--lift-s', ls.toFixed(4))
-    lines.forEach((l) => { l.setAttribute('x1', a * 100 + '%'); l.setAttribute('y1', '0'); l.setAttribute('x2', b * 100 + '%'); l.setAttribute('y2', '100%') })
-    const y = phone.matches ? 0.5 : 0.29
-    hero.style.setProperty('--and-x', (lerp(a, b, y) * 100).toFixed(3) + '%')
-    hero.style.setProperty('--and-y', y * 100 + '%')
+    const pa = (a * 100).toFixed(3) + '%', pb = (b * 100).toFixed(3) + '%'
+    sideC.style.clipPath = `polygon(0 0, ${pa} 0, ${pb} 100%, 0 100%)`
+    const lc = phone.matches ? 0 : clamp((st.c - 0.5) / LEAN, 0, 1), ls = phone.matches ? 0 : clamp((0.5 - st.c) / LEAN, 0, 1)
+    handC.style.setProperty('--lift-c', lc.toFixed(4))
+    handS.style.setProperty('--lift-s', ls.toFixed(4))
+    lines.forEach((l) => { l.setAttribute('x1', pa); l.setAttribute('x2', pb) })
   }
 
   function pick(t, from) {
     try { localStorage.setItem(KEY, t) } catch {}
     paintTeam(t)
-    if (phone.matches) { mob.show(t); return }
-    st.t = t === 'cowboy' ? 0.62 : 0.38
+    if (phone.matches) { mob.show(t); if (reduced) { st.c = mob.c; paintSeam() } return }
+    st.t = 0.5 + (t === 'cowboy' ? LEAN : -LEAN)
     st.hold = performance.now() + 1500
+    if (reduced) { st.c = 0.5 + (t === 'cowboy' ? REST : -REST); paintSeam(); return }
     hero.classList.remove('is-picked'); void hero.offsetWidth; hero.classList.add('is-picked')
     if (!reduced && from !== 'load') gsap.fromTo(t === 'cowboy' ? handC : handS, { '--rise': 0 }, { '--rise': -4, duration: 0.35, ease: 'power2.out', yoyo: true, repeat: 1 })
   }
@@ -178,23 +205,25 @@
   })
 
   if (fine) {
+    let tagSide = ''
     hero.addEventListener('pointermove', (e) => {
       st.over = true
       const r = hero.getBoundingClientRect()
       st.px = e.clientX - r.left; st.py = e.clientY - r.top
       const fx = st.px / r.width
       // the side you lean into gains ground
-      if (performance.now() > st.hold) st.t = clamp(0.5 + (0.5 - fx) * 0.4, 0.38, 0.62)
+      if (performance.now() > st.hold) st.t = clamp(0.5 + (0.5 - fx) * 0.4, 0.5 - LEAN, 0.5 + LEAN)
       const side = sideAt(e.clientX, e.clientY)
       const overUi = !!e.target.closest('a, button')
       hero.classList.toggle('has-cursor', !overUi)
-      tag.textContent = team() === side ? 'Your team' : side === 'cowboy' ? 'Team Cowboy' : 'Team Samurai'
-      tag.style.color = side === 'cowboy' ? 'var(--red)' : 'var(--blue)'
+      const label = team() === side ? 'Your team' : side === 'cowboy' ? 'Team Cowboy' : 'Team Samurai'
+      if (label + side !== tagSide) { tagSide = label + side; tag.textContent = label; tag.style.color = side === 'cowboy' ? 'var(--red)' : 'var(--blue)' }
     })
     hero.addEventListener('pointerleave', () => { st.over = false; hero.classList.remove('has-cursor') })
   }
 
-  new IntersectionObserver(([e]) => { st.visible = e.isIntersecting }).observe(hero)
+  // Off screen, the hero's looping animations (the blade's glint, the open-now pulse) stop too.
+  new IntersectionObserver(([e]) => { st.visible = e.isIntersecting; hero.classList.toggle('is-off', !e.isIntersecting) }).observe(hero)
 
   // Phones: the blade sweeps between the two sides on its own, a finger can drag it, a tap picks.
   const mob = {
@@ -233,22 +262,45 @@
   hero.addEventListener('pointerup', endDrag)
   hero.addEventListener('pointercancel', endDrag)
 
-  function heroTick(time) {
+  // The cut eases toward where it's headed and then rests. (It used to sway on its own forever, which
+  // repainted the whole hero on every frame, even with nobody touching it.)
+  function heroTick() {
     if (!st.visible) return
     if (phone.matches) { st.c = mob.c; paintSeam(); return }
     if (!st.over && performance.now() > st.hold) {
       const t = team()
-      const base = t === 'cowboy' ? 0.56 : t === 'samurai' ? 0.44 : 0.5
-      st.t = reduced ? base : base + Math.sin(time * 0.55) * 0.022
+      st.t = t === 'cowboy' ? 0.5 + REST : t === 'samurai' ? 0.5 - REST : 0.5
     }
-    st.c = lerp(st.c, st.t, reduced ? 1 : 0.075)
+    st.c = Math.abs(st.t - st.c) < 0.0002 ? st.t : lerp(st.c, st.t, 0.075)
     paintSeam()
-    if (fine && st.over) {
+    if (fine && st.over && (Math.abs(st.px - st.tx) > 0.3 || Math.abs(st.py - st.ty) > 0.3)) {
       st.tx = lerp(st.tx, st.px, 0.22); st.ty = lerp(st.ty, st.py, 0.22)
       tag.style.transform = `translate3d(${st.tx + 18}px, ${st.ty + 20}px, 0)`
     }
   }
-  if (reduced) { paintSeam() } else gsap.ticker.add(heroTick)
+  if (reduced) { paintSeam(true) } else gsap.ticker.add(heroTick)
+
+  // Each name has to clear the blade where the cut rests. Measured rather than worked out in CSS: Safari, zoomed in,
+  // draws text sized in vw bigger than the layout around it expects, and the Samurai ran into the cut.
+  const heroNames = $$('.side-name', hero)
+  function fitNames() {
+    heroNames.forEach((n) => n.style.removeProperty('--fit'))
+    if (phone.matches) return
+    const r = hero.getBoundingClientRect()
+    // the furthest the cut can lean into each side
+    const x = (y, c) => { const { a, b } = seamAt(c); return r.left + r.width * lerp(a, b, (y - r.top) / r.height) }
+    const gap = Math.max(20, r.width * 0.02)
+    let fit = 1
+    heroNames.forEach((n) => {
+      const rg = document.createRange(); rg.selectNodeContents(n)
+      const rs = [...rg.getClientRects()].filter((q) => q.width > 1)
+      const w = rs[rs.length - 1] // the big word; "The" and "and" sit above it
+      const dy = new DOMMatrix(getComputedStyle(n).transform).m42 // ignore where the intro or the scroll has moved it
+      const room = n.closest('.side--cowboy') ? x(w.bottom - dy, 0.5 - LEAN) - gap - w.left : w.right - (x(w.top - dy, 0.5 + LEAN) + gap)
+      fit = Math.min(fit, room / w.width)
+    })
+    if (fit < 1) heroNames.forEach((n) => n.style.setProperty('--fit', fit.toFixed(4)))
+  }
 
   // Manga focus lines (shuchusen) behind each burger, drawn for the current size.
   function focusLines() {
@@ -291,7 +343,9 @@
     tl.from($$('.side-name', hero), { yPercent: 40, opacity: 0, duration: 1.4, stagger: 0.06 }, 0.1)
     tl.from($$('.side-jp, .side-desc', hero), { opacity: 0, y: 16, duration: 1.2, stagger: 0.04 }, 0.4)
     tl.from(heroUi, { opacity: 0, duration: 1, stagger: 0.08, ease: 'power2.out' }, 0.55)
-    tl.from(nav, { opacity: 0, y: -12, duration: 1 }, 0.5)
+    // Explicit end values, then hand the nav back to its stylesheet: the old from() left an inline
+    // translate(0, -12px) behind, which kept the nav 12px too high and stopped it ever hiding on scroll.
+    tl.fromTo(nav, { opacity: 0, y: -12, transition: 'none' }, { opacity: 1, y: 0, duration: 1, clearProps: 'opacity,transform,transition' }, 0.5)
     return tl
   }
 
@@ -315,13 +369,27 @@
 
   /* ---------- titles take their stance: Archivo's width opens from 62 to 100 ---------- */
 
+  // A title whose longest word is wider than its column (YAA ASANTEWAA, in Safari zoomed in, where text sized in vw
+  // comes out bigger than the column around it) is scaled down until the word fits.
+  function fitTitles() {
+    $$('.stance').forEach((el) => {
+      el.style.removeProperty('font-size')
+      const over = el.scrollWidth - el.clientWidth
+      if (over > 1) el.style.fontSize = (parseFloat(getComputedStyle(el).fontSize) * (el.clientWidth / el.scrollWidth) * 0.98).toFixed(2) + 'px'
+    })
+  }
+
+  // Touch screens get the same opening as a stretch (a transform): animating the font's width re-lays out
+  // the text on every frame, which was nearly all of the page's work while scrolling.
   function stances() {
+    const from = fine ? { '--w': 62 } : { scaleX: 0.7, transformOrigin: '0% 50%' }
+    const to = fine ? { '--w': 100 } : { scaleX: 1 }
     $$('.stance').forEach((el) => {
       SplitText.create(el, {
         type: 'lines', linesClass: 'line', autoSplit: true,
         onSplit(self) {
-          return gsap.fromTo(self.lines, { '--w': 62, opacity: 0, yPercent: 30 }, {
-            '--w': 100, opacity: 1, yPercent: 0, duration: 1.5, stagger: 0.09, ease: 'expo.out',
+          return gsap.fromTo(self.lines, { ...from, opacity: 0, yPercent: 30 }, {
+            ...to, opacity: 1, yPercent: 0, duration: 1.5, stagger: 0.09, ease: 'expo.out',
             scrollTrigger: { trigger: el, start: 'top 86%', once: true },
           })
         },
@@ -377,8 +445,7 @@
     }
     const go = () => { draw(); animate() }
     img.complete ? go() : img.addEventListener('load', () => { go(); ScrollTrigger.refresh() })
-    let t
-    addEventListener('resize', () => { clearTimeout(t); t = setTimeout(go, 150) })
+    onResize(go)
   }
 
   /* ---------- videos play only while seen ---------- */
@@ -428,12 +495,12 @@
   /* ---------- go ---------- */
 
   const t0 = team()
-  if (t0) { st.c = st.t = t0 === 'cowboy' ? 0.56 : 0.44; mob.c = FULL[t0] }
+  if (t0) { st.c = st.t = 0.5 + (t0 === 'cowboy' ? REST : -REST); mob.c = FULL[t0] }
   if (phone.matches) st.c = mob.c
   paintSeam()
   mob.auto()
 
-  function layout() { fitLockup(); focusLines() }
+  function layout() { heroH = hero.offsetHeight; fitNames(); fitTitles(); fitLockup(); focusLines() }
   document.fonts.ready.then(() => {
     layout()
     if (!reduced) {
@@ -446,9 +513,8 @@
   })
   handC.complete ? focusLines() : handC.addEventListener('load', focusLines)
   handS.addEventListener('load', focusLines)
-  let rz
-  addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { layout(); paintSeam() }, 120) })
-  phone.addEventListener('change', () => { if (phone.matches) { st.c = mob.c; mob.auto() } else { mob.tl?.kill(); st.c = st.t = 0.5 } paintSeam(); focusLines(); paintStatus() })
+  onResize(() => { layout(); paintSeam(true) })
+  phone.addEventListener('change', () => { if (phone.matches) { st.c = mob.c; mob.auto() } else { mob.tl?.kill(); st.c = st.t = 0.5 } paintSeam(true); fitNames(); focusLines(); paintStatus() })
 
   if (reduced) { /* everything is already in place */ } else if (!seen && intro) runIntro()
   else heroIn(0.05)
